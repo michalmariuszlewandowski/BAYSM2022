@@ -99,7 +99,7 @@ n_burr_samples = 1000
 
 
 def main(args):
-    from src.frequentists_methods.freq import PWM_GPD, MOM_Fisher, MOM_GPD
+    from src.frequentist_methods import PWM_GPD, MOM_Fisher, MOM_GPD
 
     burr = burr_gen(a=0.0, name='burr')  # specify support [a,b], no b means b = infinity
 
