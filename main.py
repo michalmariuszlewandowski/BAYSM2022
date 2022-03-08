@@ -19,11 +19,12 @@ def main_args():
     parser.add_argument('--n_different_samples', default=5,
                         type=int, help='how many time we average over the result')
     # burr params
-    parser.add_argument('--burr_beta', default=1/4, type=float)
-    parser.add_argument('--burr_tau', default=1, type=float)
+    parser.add_argument('--burr_beta', default=.25, type=float)
+    parser.add_argument('--burr_tau', default=1., type=float)
     parser.add_argument('--burr_lambda', default=4., type=float)
 
-    parser.add_argument('--quantiles', default=[0.98, 0.99, 0.995, 0.999, 0.9995],
+    parser.add_argument('--quantiles',
+                        default=[0.98, 0.99, 0.995, 0.999, 0.9995],
                         nargs='+', type=float,
                         help='Extreme quantiles we check')
 
@@ -34,21 +35,30 @@ class burr_gen(rv_continuous):
     """
     simulate iid burr observations
     """
+
     def _cdf(self, x, beta, tau, Lambda):
         return 1 - pow(beta / (beta + pow(x, tau)), Lambda)
 
 
-def compute_true_quantiles(levels: list, burr_beta: float, burr_lambda: float, burr_tau: float) -> list:
+def compute_true_quantiles(quantile_levels: list, burr_beta: float, burr_lambda: float, burr_tau: float) -> list:
     """
     Compute true quantiles which we will compare with the true ones
-    :param levels:
+    :param burr_tau:
+    :param burr_lambda:
+    :param burr_beta:
+    :param quantile_levels:
     :return:
     """
     true_quantiles = []
 
-    for quantile in levels:
+    for quantile in quantile_levels:
         true_quantiles.append(pow(burr_beta / pow(1 - quantile, 1 / burr_lambda) - burr_beta, 1 / burr_tau))
     return true_quantiles
+
+
+class estimate_gpd_with_mle:
+    def __init__(self):
+        pass
 
 
 def mle_equations_for_gpd(x, df):
@@ -58,148 +68,172 @@ def mle_equations_for_gpd(x, df):
     :param df:
     :return:
     """
-    kk = len(df)
+    kk = len(df)  # todo what was kk?
     log_arg = np.sum([np.log(1 + x * y) for y in df])
     return kk * np.log(1 / kk / x * log_arg) + log_arg + kk
 
 
-def estimate_gpd_params_with_mle(excesses, k, u):
+def qnts_gpd_mle(excesses: np.ndarray, n_excesses: int, threshold_for_excesses: float) -> list:
     """
-    numerically solve MLE for GPD
+    estimate extreme quantiles of GPD by MLE
     :param excesses:
-    :param k:
-    :param u:
+    :param n_excesses:
+    :param threshold_for_excesses:
     :return:
     """
-    quant_MLE_GPD = np.zeros(len(quantile_levels))
+    quantiles_gpd_by_mle = []
     # constraints: x > 0
-    abstol = 1e-6
-    cons = ({'type': 'ineq', 'fun': lambda x: x - abstol})
+    contraints = ({'type': 'ineq', 'fun': lambda x: x - 1e-6})
 
-    tau = minimize(mle_equations_for_gpd, 2, args=excesses, constraints=cons, method='SLSQP')
-    gamma = 1 / len(excesses) * np.sum([np.log(1 + tau.x * y) for y in excesses])
+    tau = minimize(mle_equations_for_gpd, 2, args=excesses, constraints=contraints, method='SLSQP')
+
+    gamma = 1 / excesses.shape[0] * np.sum([np.log(1 + tau.x * y) for y in excesses])
     sigma = gamma / tau.x
     print('alpha = ', 1 / gamma, '\n beta = ', sigma / gamma)
 
-    for i in range(len(quantile_levels)):
-        quant_MLE_GPD[i] = u + sigma / gamma * (pow(n_burr_samples * (1 - quantile_levels[i]) / k, - gamma) - 1)
+    for quantile_level in quantile_levels:
+        quantiles_gpd_by_mle.append(
+            threshold_for_excesses + sigma / gamma * (
+                    pow(n_burr_samples * (1 - quantile_level) / n_excesses, - gamma) - 1)
+        )
 
-    return quant_MLE_GPD
+    return quantiles_gpd_by_mle
 
 
 def k_greatest_values_matrices(input_matrix: numpy.ndarray, n_excesses: int) -> tuple:
     """
-    :input sorted matrix
-    returns k greatest elements from the input and (k - 1)th value (1st extreme)
+    :param input_matrix: sorted matrix, observations stacked row-wise
+    :return: k greatest elements from the input and (k - 1)th value (1st extreme)
     """
-    return input_matrix.T[-n_excesses:].T, input_matrix.T[-n_excesses:].T[0]
+    excesses = input_matrix[:, -n_excesses:]
+    thresholds = input_matrix[:, -n_excesses]
+    return (excesses.T - thresholds).T, thresholds
 
-quantile_levels = [0.98, 0.99, 0.995, 0.999, 0.9995]
-n_burr_samples = 1000
+
+quantile_levels = [0.98, 0.99, 0.995, 0.999, 0.9995]  #
+n_burr_samples = 1000  # todo rename to n_points_each_sample
+
+
+def create_burr_data(n_different_samples: int, n_points_each_sample: int, burr_params: dict) -> np.ndarray:
+    burr = burr_gen(a=0.0, name='burr')  # specify support [a,b], no b means b = infinity
+
+    burr_observations_holder = np.zeros((n_different_samples, n_points_each_sample))
+
+    # todo it takes a lot of time, better create once and store somewhere
+    for i in range(n_different_samples):
+        rv_burr = burr.rvs(
+            burr_params.get('burr_beta'), burr_params.get('burr_tau'), burr_params.get('burr_lambda'),
+            size=n_points_each_sample
+        )
+        burr_observations_holder[i] = np.sort(rv_burr)
+
+    return burr_observations_holder
+
+
+def estimate_quantiles_frequentist_methods(args):
+    from src.frequentist_methods import PWM_GPD, MOM_Fisher, MOM_GPD
+
+    burr_observations_holder = create_burr_data(
+        args.n_different_samples, args.n_points_each_sample,
+        {
+            'burr_beta': args.burr_beta, 'burr_tau': args.burr_tau, 'burr_lambda': args.burr_lambda
+        }
+    )
+    # How many values do we want to consider as excesses. The more, the better approximation should we obtain
+    n_excesses_ = np.linspace(100, 500, args.n_different_thresholds).astype(int)
+    # place holders
+    # todo I could use np.zeros((4, len(quantile_levels), n_excesses_))  # 4 is for nb of methods
+    holder_qnts_pwm_gpd = np.zeros((len(quantile_levels), n_excesses_)).T
+    holder_qnts_mom_gpd = np.zeros((len(quantile_levels), n_excesses_)).T
+    holder_qnts_mom_fisher = np.zeros((len(quantile_levels), n_excesses_)).T
+    holder_qnts_mle_gpd = np.zeros((len(quantile_levels), n_excesses_)).T
+
+    for ind, n_excesses in enumerate(n_excesses_):  # for different number of excesses
+        # n_excesses = n_excesses_[j]
+        shifted_excesses, thresholds = k_greatest_values_matrices(burr_observations_holder, n_excesses)
+
+        qnts_pwm_gpd = np.zeros(len(quantile_levels))
+        qnts_mom_fisher = np.zeros(len(quantile_levels))
+        qnts_mom_gpd = np.zeros(len(quantile_levels))
+        qnts_mle_gpd = np.zeros(len(quantile_levels))
+
+        for excesses, threshold in zip(shifted_excesses, thresholds):
+            # fit GPD and Fisher distributions to excesses from each dataset
+            qnts_pwm_gpd += PWM_GPD(excesses, threshold)
+            qnts_mom_fisher += MOM_Fisher(excesses, threshold)[0]
+            qnts_mom_gpd += MOM_GPD(excesses, n_excesses, threshold)
+            qnts_mle_gpd += qnts_gpd_mle(excesses, n_excesses, threshold)
+
+        holder_qnts_pwm_gpd[ind] = qnts_pwm_gpd / args.n_different_samples
+        holder_qnts_mom_gpd[ind] = qnts_mom_gpd / args.n_different_samples
+        holder_qnts_mom_fisher[ind] = qnts_mom_fisher / args.n_different_samples
+        holder_qnts_mle_gpd[ind] = qnts_mle_gpd / args.n_different_samples
+
+    return holder_qnts_pwm_gpd, holder_qnts_mom_gpd, holder_qnts_mom_fisher, holder_qnts_mle_gpd
+
+
+def plot_quantiles(qnts_pwm_gpd, qnts_mom_gpd, qnts_mom_fisher, qnts_mle_gpd):
+    """
+    for plotting the results against true quantiles
+    :param qnts_pwm_gpd:
+    :param qnts_mom_gpd:
+    :param qnts_mom_fisher:
+    :param qnts_mle_gpd:
+    :return:
+    """
+    true_quantiles = compute_true_quantiles(quantile_levels, args.burr_beta, args.burr_lambda, args.burr_tau)
+    n_excesses_ = qnts_pwm_gpd.shape[1]  # nb of columns in any above
+    for ind in range(len(quantile_levels)):
+        fig, ax = plt.subplots()
+
+        ax.hlines(y=true_quantiles[ind],
+                  xmin=min(n_excesses_),
+                  xmax=max(n_excesses_),
+                  color='gray',
+                  zorder=1,
+                  label='theoretical value')
+
+        ax.plot(n_excesses_, qnts_mom_fisher[ind, :], 'red', label='MOM Fisher')
+        ax.plot(n_excesses_, qnts_mom_gpd[ind, :], 'deepskyblue', label='MOM GPD')
+        ax.plot(n_excesses_, qnts_pwm_gpd[ind, :], 'aqua', label='PWM GPD')
+        ax.plot(n_excesses_, qnts_mle_gpd[ind, :], 'mediumblue', label='MLE GPD')
+
+        ax.xlabel('number of excesses')
+        ax.ylabel('value of quantile at level ' + str(quantile_levels[ind]))
+        ax.title('Variability of quantile at level ' + str(quantile_levels[ind]))
+        ax.legend()
+
+        fig.show()
+
+    print('Plotted results')
+
+
+def helper_norm_ss(arr: np.ndarray, ind: int, true_quantile: float):
+    assert 0 < true_quantile < 1, 'Quantile level out of range'
+    squared_norm_ss = np.sum([pow(x - true_quantile, 2) for x in arr[ind, :]]) / pow(true_quantile, 2)
+
+    return np.sqrt(squared_norm_ss / arr.shape[1])  # arr.shape should be the nb of different thresholds tried?
 
 
 def main(args):
-    from src.frequentist_methods import PWM_GPD, MOM_Fisher, MOM_GPD
 
-    burr = burr_gen(a=0.0, name='burr')  # specify support [a,b], no b means b = infinity
+    qnts_pwm_gpd, qnts_mom_gpd, qnts_mom_fisher, qnts_mle_gpd = estimate_quantiles_frequentist_methods(args)
+    # columns: different nb of excesses used to estimate quantiles
+    # rows: quantiles of different levels
 
-    true_quantiles = compute_true_quantiles(quantile_levels, args.burr_beta, args.burr_lambda, args.burr_tau)
-    burr_observations_holder = np.zeros((args.n_different_samples, args.n_points_each_sample))
-
-    # todo it takes a lot of time, better create once and store somewhere
-    for i in range(args.n_different_samples):
-        rv_burr = burr.rvs(args.burr_beta, args.burr_tau, args.burr_lambda, size=args.n_points_each_sample)
-        burr_observations_holder[i] = np.sort(rv_burr)
-
-    # How many values do we want to consider as excesses. The more, the better approximation should we obtain
-    n_excesses = np.linspace(100, 500, args.n_different_thresholds).astype(int)
-
-    # probability_weighted_moments_GPD = np.zeros(len(q))
-    # todo for sure there is smarted way of storing these data
-    concatenated_PWM_GPD = np.zeros(len(quantile_levels))
-    concatenated_MOM_Fisher = np.zeros(len(quantile_levels))
-    concatenated_MOM_GPD = np.zeros(len(quantile_levels))
-    concatenated_MLE_GPD = np.zeros(len(quantile_levels))
-
-    for j in range(len(n_excesses)):  # for different threshold of excesses
-        k = n_excesses[j]
-        data_frechet, u = k_greatest_values_matrices(burr_observations_holder, k)
-        # delete first column (indexed by 0) of a matrix A, to match the sizes
-        A = np.delete(data_frechet, 0, 1)
-        # from the array of u values we create matrix, in columns we have repeated u values
-        B = [[x] * k for x in u]
-        # here we subtract u_i from excesses in each dataset
-        C = np.array(A) - np.array(B).transpose()
-
-        averaged_PWM_GPD = np.zeros(len(quantile_levels))
-        averaged_MOM_Fisher = np.zeros(len(quantile_levels))
-        averaged_MOM_GPD = np.zeros(len(quantile_levels))
-        averaged_MLE_GPD = np.zeros(len(quantile_levels))
-        #     counter = np.zeros(len(q))
-        counter = 0
-
-        for ind in range(args.n_different_samples):
-            # we fit GPD and Fisher distributions to excesses from each dataset
-            excesses_array = C[:, ind]
-            averaged_PWM_GPD += 1 / args.n_different_samples * PWM_GPD(excesses_array, k, u[ind])
-            averaged_MOM_Fisher += 1 / args.n_different_samples * MOM_Fisher(excesses_array, k, u[ind])[0]
-            averaged_MOM_GPD += 1 / args.n_different_samples * MOM_GPD(excesses_array, k, u[ind])
-            averaged_MLE_GPD += 1 / args.n_different_samples * estimate_gpd_params_with_mle(excesses_array, k, u[ind])
-            counter += MOM_Fisher(excesses_array, k, u[ind])[1]
-
-        concatenated_MOM_GPD = np.column_stack((concatenated_MOM_GPD, averaged_MOM_GPD))
-        concatenated_MOM_Fisher = np.column_stack((concatenated_MOM_Fisher, averaged_MOM_Fisher * args.n_different_samples / counter)) #*n/counter
-        concatenated_PWM_GPD = np.column_stack((concatenated_PWM_GPD, averaged_PWM_GPD))
-        concatenated_MLE_GPD = np.column_stack((concatenated_MLE_GPD, averaged_MLE_GPD))
-
-    # we delete first column which was created as zeros
-    # we need those to plot quantiles on one plot and to compare them
-    concatenated_MOM_GPD = np.delete(concatenated_MOM_GPD, 0, 1)
-    concatenated_PWM_GPD = np.delete(concatenated_PWM_GPD, 0, 1)
-    concatenated_MOM_Fisher = np.delete(concatenated_MOM_Fisher, 0, 1)
-    concatenated_MLE_GPD = np.delete(concatenated_MLE_GPD, 0, 1)
-
-    for ind in range(len(quantile_levels)):
-
-        fig = plt.figure()
-
-        plt.hlines(y=true_quantiles[ind],
-                   xmin=min(n_excesses),
-                   xmax=max(n_excesses),
-                   color='gray',
-                   zorder=1,
-                   label='theoretical value')
-
-        plt.plot(n_excesses, concatenated_MOM_Fisher[ind, :], 'red', label='MOM Fisher')
-        plt.plot(n_excesses, concatenated_MOM_GPD[ind, :], 'deepskyblue', label='MOM GPD')
-        plt.plot(n_excesses, concatenated_PWM_GPD[ind, :], 'aqua', label='PWM GPD')
-        plt.plot(n_excesses, concatenated_MLE_GPD[ind, :], 'mediumblue', label='MLE GPD')
-
-        plt.xlabel('number of excesses')
-        plt.ylabel('value of quantile at level ' + str(quantile_levels[ind]))
-        plt.title('Variability of quantile at level ' + str(quantile_levels[ind]))
-        plt.legend()
-
-    plt.show()
-
+    # now for testing how good the fit is
     MOM_Fisher = np.zeros(len(quantile_levels))
     MOM_GPD = np.zeros(len(quantile_levels))
     MLE_GPD = np.zeros(len(quantile_levels))
     PWM_GPD = np.zeros(len(quantile_levels))
 
     for ind in range(len(quantile_levels)):
-        # todo this can be put in function
         # q[i] - current level - get all distance of all methods for this level
-        MOM_Fisher[ind] = np.sqrt(1 / args.n_different_thresholds * np.nansum(
-            [pow(x - true_quantiles[ind], 2) for x in concatenated_MOM_Fisher[ind, :]]) / pow(true_quantiles[ind],
-                                                                                                        2))  # nansum - treating nans as zero
-        MOM_GPD[ind] = np.sqrt(1 / args.n_different_thresholds * np.nansum(
-            [pow(x - true_quantiles[ind], 2) for x in concatenated_MOM_GPD[ind, :]]) / pow(true_quantiles[ind], 2))
-        MLE_GPD[ind] = np.sqrt(1 / args.n_different_thresholds * np.nansum(
-            [pow(x - true_quantiles[ind], 2) for x in concatenated_MLE_GPD[ind, :]]) / pow(true_quantiles[ind], 2))
-        PWM_GPD[ind] = np.sqrt(1 / args.n_different_thresholds * np.nansum(
-            [pow(x - true_quantiles[ind], 2) for x in concatenated_PWM_GPD[ind, :]]) / pow(true_quantiles[ind], 2))
-        # plot_table(q[i], MLE_GPD, PWM_GPD, MOM_GPD, MOM_Fisher)
+        # this is already for testing how good the estimate is
+        MOM_Fisher[ind] = helper_norm_ss(qnts_mom_fisher, ind, quantile_levels[ind])
+        MOM_GPD[ind] = helper_norm_ss(qnts_mom_gpd, ind, quantile_levels[ind])
+        MLE_GPD[ind] = helper_norm_ss(qnts_mle_gpd, ind, quantile_levels[ind])
+        PWM_GPD[ind] = helper_norm_ss(qnts_pwm_gpd, ind, quantile_levels[ind])
 
     M = [[round(x, 6) for x in MOM_Fisher],
          [round(x, 6) for x in MOM_GPD],
@@ -212,11 +246,10 @@ def main(args):
          'PWM GPD': M[3][1:]}
     #      'col5': [round(x, rounding) for x in MLE_GPD]}
     df = pd.DataFrame(data=d, index=['0.99', '0.995', '0.999', '0.9995'])
-    # print(df.to_latex())
     print(df.T.to_latex())
 
     for ind in range(len(quantile_levels)):
-        print(concatenated_MOM_Fisher[ind, :])
+        print(qnts_mom_fisher[ind, :])
 
 
 if __name__ == '__main__':
@@ -226,4 +259,4 @@ if __name__ == '__main__':
     main(args)
     ending = datetime.datetime.now()
 
-    print('Time', (ending-beginning).seconds)
+    print('Time: ', ending - beginning)
