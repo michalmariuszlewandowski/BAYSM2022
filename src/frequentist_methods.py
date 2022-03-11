@@ -61,7 +61,8 @@ def MOM_Fisher(excesses: np.ndarray, thresholds: np.ndarray) -> tuple:
     return quant_MOM_Fisher
 
 
-def MOM_GPD(excesses, k, u):
+def MOM_GPD(excesses, threshold):
+    n_excesses = excesses.shape[0]
     quant_MOM_GPD = np.zeros(len(quantile_levels))
     c0 = np.mean(excesses)
     c1 = np.sum([pow(x, 1 / 2) for x in excesses]) / np.sum([pow(x, -1 / 2) for x in excesses])
@@ -70,5 +71,5 @@ def MOM_GPD(excesses, k, u):
     beta = c0 * (alpha2 - 1)
     #     alpha2 = alpha2_prim + 1/2
     for i in range(len(quantile_levels)):
-        quant_MOM_GPD[i] = u + beta * (pow(n_burr_samples * (1 - quantile_levels[i]) / k, - 1 / alpha2) - 1)
+        quant_MOM_GPD[i] = threshold + beta * (pow(n_burr_samples * (1 - quantile_levels[i]) / n_excesses, - 1 / alpha2) - 1)
     return quant_MOM_GPD
