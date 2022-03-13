@@ -6,7 +6,6 @@ import datetime
 from pathlib import Path
 from arg_parser import main_args
 from src.data.make_data import create_burr_data
-from src.frequentist_methods import qnts_gpd_mle
 
 
 def compute_true_quantiles(quantile_levels: list, burr_beta: float, burr_lambda: float, burr_tau: float) -> list:
@@ -24,11 +23,6 @@ def compute_true_quantiles(quantile_levels: list, burr_beta: float, burr_lambda:
     return true_quantiles
 
 
-class estimate_gpd_with_mle:
-    def __init__(self):
-        pass
-
-
 def k_greatest_values_matrices(input_matrix: numpy.ndarray, n_excesses: int) -> tuple:
     """
     :param input_matrix: sorted matrix, observations stacked row-wise
@@ -40,43 +34,45 @@ def k_greatest_values_matrices(input_matrix: numpy.ndarray, n_excesses: int) -> 
 
 
 def estimate_quantiles_frequentist_methods(args, burr_data):
-    from src.frequentist_methods import PWM_GPD, MOM_Fisher, MOM_GPD
-
+    from src.frequentist_methods import freq_methods
     # How many values do we want to consider as excesses. The more, the better approximation should we obtain
     n_excesses_ = np.linspace(100, 500, args.n_different_thresholds).astype(int)
 
-    # place holder
-    keep_quantiles = {'pwm_gpd': np.zeros((len(args.quantile_levels), n_excesses_)).T,
-                      'mom_gpd': np.zeros((len(args.quantile_levels), n_excesses_)).T,
-                      'mom_fisher': np.zeros((len(args.quantile_levels), n_excesses_)).T,
-                      'mle_gpd': np.zeros((len(args.quantile_levels), n_excesses_)).T}
+    keep_quantiles = {'pwm_gpd': np.zeros((len(args.quantile_levels), n_excesses_.shape[0])).T,
+                      'mom_gpd': np.zeros((len(args.quantile_levels), n_excesses_.shape[0])).T,
+                      'mom_fisher': np.zeros((len(args.quantile_levels), n_excesses_.shape[0])).T,
+                      'mle_gpd': np.zeros((len(args.quantile_levels), n_excesses_.shape[0])).T}
 
     for ind, n_excesses in enumerate(n_excesses_):  # for different number of excesses
-        # n_excesses = n_excesses_[j]
         shifted_excesses, thresholds = k_greatest_values_matrices(burr_data, n_excesses)
 
-        qnts_pwm_gpd = np.zeros(len(args.quantile_levels))
-        qnts_mom_fisher = np.zeros(len(args.quantile_levels))
-        qnts_mom_gpd = np.zeros(len(args.quantile_levels))
-        qnts_mle_gpd = np.zeros(len(args.quantile_levels))
+        qnts = np.zeros((len(keep_quantiles), len(args.quantile_levels)))
 
         for excesses, threshold in zip(shifted_excesses, thresholds):
+            frequentist = freq_methods(data=burr_data, quantile_levels=args.quantile_levels,
+                                       excesses=excesses, thresholds=thresholds)
             # fit GPD and Fisher distributions to excesses from each dataset
-            # todo put these methods as a class
-            qnts_pwm_gpd += PWM_GPD(excesses, threshold)
-            qnts_mom_fisher += MOM_Fisher(excesses, threshold)[0]
-            qnts_mom_gpd += MOM_GPD(excesses, threshold)
-            qnts_mle_gpd += qnts_gpd_mle(excesses, threshold)
+            qnts[0] += frequentist.PWM_GPD()
+            qnts[1] += frequentist.MOM_GPD()
+            qnts[2] += frequentist.MLE_GPD()
+            qnts[3] += frequentist.MOM_Fisher()
 
-        keep_quantiles.get('pwm_gpd')[ind] = qnts_pwm_gpd / args.n_different_samples
-        keep_quantiles.get('mom_gpd')[ind] = qnts_mom_gpd / args.n_different_samples
-        keep_quantiles.get('mom_fisher')[ind] = qnts_mom_fisher / args.n_different_samples
-        keep_quantiles.get('mle_gpd')[ind] = qnts_mle_gpd / args.n_different_samples
+        keep_quantiles.get('pwm_gpd')[ind] = qnts[0] / args.n_different_samples
+        keep_quantiles.get('mom_gpd')[ind] = qnts[1] / args.n_different_samples
+        keep_quantiles.get('mle_gpd')[ind] = qnts[2] / args.n_different_samples
+        keep_quantiles.get('mom_fisher')[ind] = qnts[3] / args.n_different_samples
 
     return keep_quantiles
 
 
-def helper_norm_ss(arr: np.ndarray, ind: int, true_quantile: float):
+def l2_norm(arr: np.ndarray, ind: int, true_quantile: float):
+    """
+    l2 norm of (scaled) differences between the true quantile and its estimate
+    :param arr:
+    :param ind:
+    :param true_quantile:
+    :return:
+    """
     assert 0 < true_quantile < 1, 'Quantile level out of range'
     squared_norm_ss = np.sum([pow(x - true_quantile, 2) for x in arr[ind, :]]) / pow(true_quantile, 2)
 
@@ -85,10 +81,17 @@ def helper_norm_ss(arr: np.ndarray, ind: int, true_quantile: float):
 
 def main(args):
     # load data
-    save_dir = Path.cwd() / 'data/data_burr/'
+    save_dir = Path.cwd() / 'src/data/data_burr/'
     file_name = save_dir.__str__() + f'\\beta_{args.burr_beta}__tau_{args.burr_tau}__lambda_{args.burr_lambda}__n_samples_{args.n_different_samples}__n_obs_per_sample_{args.n_points_each_sample}.npy'
     with open(file_name, 'rb') as f:
         burr_data = np.load(f)
+    import matplotlib.pyplot as plt
+    # take random sample
+    ind = int(np.random.uniform(burr_data.shape[0], size=1))
+    plt.hist(burr_data[ind], bins='auto')
+    plt.title(f'Empirical mean {round(np.mean(burr_data[ind]),3)}, '
+              f'var {round(np.var(burr_data[ind]), 3)}')
+    plt.show()
 
     keep_quantiles = estimate_quantiles_frequentist_methods(args, burr_data)
     # qnts_pwm_gpd, qnts_mom_gpd, qnts_mom_fisher, qnts_mle_gpd
@@ -104,23 +107,10 @@ def main(args):
     for ind in range(len(args.quantile_levels)):
         # q[i] - current level - get all distance of all methods for this level
         # this is already for testing how good the estimate is
-        MOM_Fisher[ind] = helper_norm_ss(keep_quantiles.get('mom_fisher'), ind, args.quantile_levels[ind])
-        MOM_GPD[ind] = helper_norm_ss(keep_quantiles.get('mom_gpd'), ind, args.quantile_levels[ind])
-        MLE_GPD[ind] = helper_norm_ss(keep_quantiles.get('mle_gpd'), ind, args.quantile_levels[ind])
-        PWM_GPD[ind] = helper_norm_ss(keep_quantiles.get('pwm_gpd'), ind, args.quantile_levels[ind])
-
-    M = [[round(x, 6) for x in MOM_Fisher],
-         [round(x, 6) for x in MOM_GPD],
-         [round(x, 6) for x in MLE_GPD],
-         [round(x, 6) for x in PWM_GPD]]
-
-    d = {'MOM Fisher': M[0][1:],
-         'MOM GPD': M[1][1:],
-         'MLE GPD': M[2][1:],
-         'PWM GPD': M[3][1:]}
-    #      'col5': [round(x, rounding) for x in MLE_GPD]}
-    df = pd.DataFrame(data=d, index=['0.99', '0.995', '0.999', '0.9995'])
-    print(df.T.to_latex())
+        MOM_Fisher[ind] = l2_norm(keep_quantiles.get('mom_fisher'), ind, args.quantile_levels[ind])
+        MOM_GPD[ind] = l2_norm(keep_quantiles.get('mom_gpd'), ind, args.quantile_levels[ind])
+        MLE_GPD[ind] = l2_norm(keep_quantiles.get('mle_gpd'), ind, args.quantile_levels[ind])
+        PWM_GPD[ind] = l2_norm(keep_quantiles.get('pwm_gpd'), ind, args.quantile_levels[ind])
 
 
 if __name__ == '__main__':

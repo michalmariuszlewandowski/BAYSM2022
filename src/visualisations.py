@@ -3,7 +3,7 @@ loads and plots estimated and saved somewhere else quantiles
 """
 from matplotlib import pyplot as plt
 
-from main import compute_true_quantiles, quantile_levels, args
+from main import compute_true_quantiles, args
 
 
 def plot_quantiles(qnts_pwm_gpd, qnts_mom_gpd, qnts_mom_fisher, qnts_mle_gpd):
