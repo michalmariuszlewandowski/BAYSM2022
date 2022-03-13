@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.optimize import minimize
 from scipy.stats import f
 
 from main import quantile_levels, n_burr_samples
@@ -73,3 +74,43 @@ def MOM_GPD(excesses, threshold):
     for i in range(len(quantile_levels)):
         quant_MOM_GPD[i] = threshold + beta * (pow(n_burr_samples * (1 - quantile_levels[i]) / n_excesses, - 1 / alpha2) - 1)
     return quant_MOM_GPD
+
+
+def mle_equations_for_gpd(x, df):
+    """
+    equations for gpd which we solve using a numerical solver. These equations arise from MLE
+    :param x:
+    :param df:
+    :return:
+    """
+    kk = len(df)  # todo what was kk?
+    log_arg = np.sum([np.log(1 + x * y) for y in df])
+    return kk * np.log(1 / kk / x * log_arg) + log_arg + kk
+
+
+def qnts_gpd_mle(excesses: np.ndarray, threshold: float) -> list:
+    """
+    estimate extreme quantiles of GPD by MLE
+    :param excesses:
+    :param n_excesses:
+    :param threshold:
+    :return:
+    """
+    quantiles_gpd_by_mle = []
+    n_excesses = excesses.shape[0]
+    # constraints: x > 0
+    contraints = ({'type': 'ineq', 'fun': lambda x: x - 1e-6})
+
+    tau = minimize(mle_equations_for_gpd, 2, args=excesses, constraints=contraints, method='SLSQP')
+
+    gamma = 1 / excesses.shape[0] * np.sum([np.log(1 + tau.x * y) for y in excesses])
+    sigma = gamma / tau.x
+    print('alpha = ', 1 / gamma, '\n beta = ', sigma / gamma)
+
+    for quantile_level in quantile_levels:
+        quantiles_gpd_by_mle.append(
+            threshold + sigma / gamma * (
+                    pow(n_burr_samples * (1 - quantile_level) / n_excesses, - gamma) - 1)
+        )
+
+    return quantiles_gpd_by_mle
