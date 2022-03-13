@@ -53,12 +53,12 @@ def estimate_quantiles_frequentist_methods(args, burr_data):
                                        excesses=excesses, thresholds=thresholds)
             # fit GPD and Fisher distributions to excesses from each dataset
             qnts[0] += frequentist.PWM_GPD()
-            qnts[1] += frequentist.MOM_GPD()
+            # qnts[1] += frequentist.MOM_GPD()  # todo can't work with 1/2 powers in denominator and nominator
             qnts[2] += frequentist.MLE_GPD()
             qnts[3] += frequentist.MOM_Fisher()
 
         keep_quantiles.get('pwm_gpd')[ind] = qnts[0] / args.n_different_samples
-        keep_quantiles.get('mom_gpd')[ind] = qnts[1] / args.n_different_samples
+        # keep_quantiles.get('mom_gpd')[ind] = qnts[1] / args.n_different_samples
         keep_quantiles.get('mle_gpd')[ind] = qnts[2] / args.n_different_samples
         keep_quantiles.get('mom_fisher')[ind] = qnts[3] / args.n_different_samples
 

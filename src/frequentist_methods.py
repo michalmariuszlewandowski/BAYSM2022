@@ -7,7 +7,7 @@ class freq_methods:
     def __init__(self, data: np.ndarray, quantile_levels: list, excesses: np.ndarray, thresholds: np.ndarray):
         self.data = data  # original full data, not excesses
         self.quantile_levels = quantile_levels
-        self.excesses = excesses
+        self.excesses = excesses[1:]
         self.thresholds = thresholds
         self.n_excesses = excesses.shape[0]
         # I can add here a function which returns excesses and thresholds
@@ -22,6 +22,7 @@ class freq_methods:
         quant_PWM_GPD = []
         # n_excesses = self.excesses.shape[0]
         sum1, sum2 = 0, 0
+        # todo sth is wrong here.. dont use 1st input of self.excesses, its 0 and messes up with denominator
         for quantile_level in range(self.n_excesses):
             sum1 += self.excesses[quantile_level]
             sum2 += quantile_level * self.excesses[quantile_level]
@@ -36,7 +37,8 @@ class freq_methods:
                         pow(self.data.shape[1] * (1 - quantile_level) / self.n_excesses, -gamma) - 1))
         # for each quantile level we need to use the same n_excesses and the same threshold
 
-        return quant_PWM_GPD
+        # return quant_PWM_GPD
+        return np.array(quant_PWM_GPD).mean(axis=1)
 
     def MOM_Fisher(self) -> list:
         """
@@ -47,38 +49,39 @@ class freq_methods:
         """
         quant_MOM_Fisher = []
         # n_excesses = excesses.shape[0]
-        c0 = np.mean(self.excesses)
-        c1 = np.sum([pow(x, 1 / 2) for x in self.excesses]) / np.sum([pow(x, -1 / 2) for x in self.excesses])
-        c2 = np.sum([pow(x, 3 / 4) for x in self.excesses]) / np.sum([pow(x, -1 / 4) for x in self.excesses])
+        c1 = np.sum([pow(x, 1 / 5) for x in self.excesses]) / np.sum([pow(x, -4 / 5) for x in self.excesses])
+        c2 = np.sum([pow(x, 1 / 6) for x in self.excesses]) / np.sum([pow(x, -5 / 6) for x in self.excesses])
+        c3 = np.sum([pow(x, 2 / 5) for x in self.excesses]) / np.sum([pow(x, -3 / 5) for x in self.excesses])
 
-        alpha2_prim = (c2 - c0) / 2 / (-c0 - c1 + 2 * c2)
-        alpha1_prim = (c1 * alpha2_prim) / 2 / (c0 * (alpha2_prim - 1 / 2) - alpha2_prim * c1)
+        beta = 5*c2-6*c1
+        alpha2 = (2*c3+5*c2-6*c1)/5/(c3-c1)
+        alpha1 = ((5*alpha2-1)*c1 + 4*beta)/5/beta
 
-        alpha1 = alpha1_prim + 1 / 2
-        alpha2 = alpha2_prim + 1 / 2
         assert alpha1 >= 0 and alpha2 >= 0, 'alpha1 or alpha2 is negative'
-        beta = c1 * (alpha2 - 1 / 2) / (alpha1 - 1 / 2)
-        #     print("k = ", k, "alpha1 = ", alpha1, "alpha2 = ", alpha2, "beta = ", beta, "expectation = ", c0)
         beta0 = alpha2 / alpha1
         for i in range(len(self.quantile_levels)):
             quant_MOM_Fisher.append(self.thresholds + f.isf(self.data.shape[1] / self.n_excesses * (1 - self.quantile_levels[i]), 2 * alpha1,
                                                      2 * alpha2, loc=0,
                                                      scale=beta / beta0))
-             # quant_MOM_Fisher[i] = u +  f.isf(N / k * (1 - q[i]), 2 * alpha1, 2 * alpha2, loc = 0, scale = beta / beta0)
         return quant_MOM_Fisher
 
     def MOM_GPD(self)->list:
         # n_excesses = excesses.shape[0]
         quant_MOM_GPD = []
         c0 = np.mean(self.excesses)
+        # todo error: can't take 1/2 powers...
         c1 = np.sum([pow(x, 1 / 2) for x in self.excesses]) / np.sum([pow(x, -1 / 2) for x in self.excesses])
         # c2 = np.sum([pow(x,3/4) for x in excesses])/np.sum([pow(x,-1/4) for x in excesses])
         alpha2 = (c1 - c0) / (2 * c1 - c0)
         beta = c0 * (alpha2 - 1)
         #     alpha2 = alpha2_prim + 1/2
-        for i in range(len(self.quantile_levels)):
-            quant_MOM_GPD.append(self.thresholds + beta * (pow(self.data.shape[1] * (1 - self.quantile_levels[i]) / self.n_excesses, - 1 / alpha2) - 1))
-        return quant_MOM_GPD
+        for quantile_level in self.quantile_levels:
+            quant_MOM_GPD.append(
+                self.thresholds + beta *
+                (pow(self.data.shape[1] * (1 - quantile_level) / self.n_excesses, - 1 / alpha2) - 1)
+            )
+        return np.array(quant_MOM_GPD).mean(axis=1)
+        # return quant_MOM_GPD
 
     def _mle_equations_for_gpd(self, x, df):
         """
@@ -116,4 +119,4 @@ class freq_methods:
                         pow(self.data.shape[1] * (1 - quantile_level) / self.n_excesses, - gamma) - 1)
             )
 
-        return quantiles_gpd_by_mle
+        return np.array(quantiles_gpd_by_mle).mean(axis=1)
