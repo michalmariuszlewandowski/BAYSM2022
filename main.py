@@ -53,12 +53,12 @@ def estimate_quantiles_frequentist_methods(args, burr_data):
                                        excesses=excesses, thresholds=thresholds)
             # fit GPD and Fisher distributions to excesses from each dataset
             qnts[0] += frequentist.PWM_GPD()
-            # qnts[1] += frequentist.MOM_GPD()  # todo can't work with 1/2 powers in denominator and nominator
+            qnts[1] += frequentist.MOM_GPD()  #
             qnts[2] += frequentist.MLE_GPD()
             qnts[3] += frequentist.MOM_Fisher()
 
         keep_quantiles.get('pwm_gpd')[ind] = qnts[0] / args.n_different_samples
-        # keep_quantiles.get('mom_gpd')[ind] = qnts[1] / args.n_different_samples
+        keep_quantiles.get('mom_gpd')[ind] = qnts[1] / args.n_different_samples
         keep_quantiles.get('mle_gpd')[ind] = qnts[2] / args.n_different_samples
         keep_quantiles.get('mom_fisher')[ind] = qnts[3] / args.n_different_samples
 
@@ -79,6 +79,49 @@ def l2_norm(arr: np.ndarray, ind: int, true_quantile: float):
     return np.sqrt(squared_norm_ss / arr.shape[1])  # arr.shape should be the nb of different thresholds tried?
 
 
+def plot(keep_quantiles:dict):
+    import matplotlib.pyplot as plt
+
+    # set different colors for each set of positions
+    fig, ax = plt.subplots()
+    colors1 = ['C{}'.format(i) for i in range(5)]
+    # create a vertical plot
+    # set different line properties for each set of positions
+    # note that some overlap
+    lineoffsets1 = np.array([-15, -3, 1, 1.5, 6])
+    linelengths1 = [5, 2, 1, 1, 3]
+
+    ax.eventplot(keep_quantiles.get('mom_fisher').T, colors=colors1, lineoffsets=lineoffsets1,
+                        linelengths=linelengths1, orientation='vertical')
+
+    # create another set of random data.
+    # the gamma distribution is only used fo aesthetic purposes
+    data2 = np.random.gamma(4, size=[60, 50])
+
+    # use individual values for the parameters this time
+    # these values will be used for all data sets (except lineoffsets2, which
+    # sets the increment between each data set in this usage)
+    colors2 = 'black'
+    lineoffsets2 = 1
+    linelengths2 = 1
+
+    # create a horizontal plot
+    ax.eventplot(data2, colors=colors2, lineoffsets=lineoffsets2,
+                        linelengths=linelengths2)
+
+    # create a vertical plot
+    ax.eventplot(data2, colors=colors2, lineoffsets=lineoffsets2,
+                        linelengths=linelengths2, orientation='vertical')
+
+    plt.show()
+
+    ax.scatter(args.quantile_levels, keep_quantiles.get('mom_fisher'))
+    ax.scatter(keep_quantiles.get('mom_gpd'))
+    ax.scatter(keep_quantiles.get('mle_gpd'))
+    ax.scatter(keep_quantiles.get('pwm_gpd'))
+    fig.show()
+
+
 def main(args):
     # load data
     save_dir = Path.cwd() / 'src/data/data_burr/'
@@ -97,6 +140,7 @@ def main(args):
     # qnts_pwm_gpd, qnts_mom_gpd, qnts_mom_fisher, qnts_mle_gpd
     # columns: different nb of excesses used to estimate quantiles
     # rows: quantiles of different levels
+
 
     # now for testing how good the fit is
     MOM_Fisher = np.zeros(len(args.quantile_levels))
