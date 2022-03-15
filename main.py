@@ -33,10 +33,9 @@ def k_greatest_values_matrices(input_matrix: numpy.ndarray, n_excesses: int) -> 
     return (excesses.T - thresholds).T, thresholds
 
 
-def estimate_quantiles_frequentist_methods(args, burr_data):
+def estimate_quantiles_frequentist_methods(args, burr_data, n_excesses_):
     from src.frequentist_methods import freq_methods
     # How many values do we want to consider as excesses. The more, the better approximation should we obtain
-    n_excesses_ = np.linspace(100, 500, args.n_different_thresholds).astype(int)
 
     keep_quantiles = {'pwm_gpd': np.zeros((len(args.quantile_levels), n_excesses_.shape[0])).T,
                       'mom_gpd': np.zeros((len(args.quantile_levels), n_excesses_.shape[0])).T,
@@ -121,26 +120,73 @@ def plot(keep_quantiles:dict):
     ax.scatter(keep_quantiles.get('pwm_gpd'))
     fig.show()
 
+    # another trial
+    # colors = ['blue', 'orange', 'green', 'red', 'brown']
+    import matplotlib.cm as cm
 
-def main(args):
+    fig, ax = plt.subplots()
+    colors = ['r', 'c', 'm', 'y', 'g']
+    # colors = cm.rainbow(np.linspace(0, 1, 5))
+    # loop over symbols
+    # for (keys, values), col in zip(keep_quantiles.items(), colors):
+    #     print(col)
+    ax.plot(n_excesses_, keep_quantiles.get('mom_gpd'), 'x')  # , c=colors
+    ax.plot(n_excesses_, keep_quantiles.get('mle_gpd'), '.')  # , c=colors
+    plt.show()
+
+
+def main(args, n_excesses_):
     # load data
     save_dir = Path.cwd() / 'src/data/data_burr/'
     file_name = save_dir.__str__() + f'\\beta_{args.burr_beta}__tau_{args.burr_tau}__lambda_{args.burr_lambda}__n_samples_{args.n_different_samples}__n_obs_per_sample_{args.n_points_each_sample}.npy'
     with open(file_name, 'rb') as f:
         burr_data = np.load(f)
     import matplotlib.pyplot as plt
-    # take random sample
+    # take a random sample
     ind = int(np.random.uniform(burr_data.shape[0], size=1))
     plt.hist(burr_data[ind], bins='auto')
     plt.title(f'Empirical mean {round(np.mean(burr_data[ind]),3)}, '
               f'var {round(np.var(burr_data[ind]), 3)}')
     plt.show()
 
-    keep_quantiles = estimate_quantiles_frequentist_methods(args, burr_data)
+    keep_quantiles = estimate_quantiles_frequentist_methods(args, burr_data, n_excesses_)
     # qnts_pwm_gpd, qnts_mom_gpd, qnts_mom_fisher, qnts_mle_gpd
     # columns: different nb of excesses used to estimate quantiles
     # rows: quantiles of different levels
 
+    col = ['b', 'g', 'r', 'c', 'y']
+    symbols = ['*', 'x', '>', '<', '.']
+    # fig, ax = plt.subplots()
+
+    def def_marker(key: str) -> str:
+        if 'mom_fisher' in key:
+            return symbols[0]
+        elif 'mom_gpd' in key:
+            return symbols[1]
+        elif 'mle_gpd' in key:
+            return symbols[2]
+        elif 'pwm_gpd' in key:
+            return symbols[3]
+
+    import matplotlib.pyplot as plt
+
+    def legend_without_duplicate_labels(ax):
+        handles, labels = ax.get_legend_handles_labels()
+        unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
+        ax.legend(*zip(*unique))
+
+    fig, ax = plt.subplots()
+    for keys, values in keep_quantiles.items():
+        if keys is not 'mom_fisher':  # for now omit mom_fisher because the values are very different
+            for xe, ye in zip(n_excesses_, values):
+                # ax.plot([xe] * len(ye), ye[, def_marker(keys), label=keys)
+                for i in range(values.shape[0]):
+                    ax.plot([xe] * len([ye[i]]), ye[i], def_marker(keys), label=keys, c=col[i])
+    # todo: put on the legend which color corresponds to which quantile level
+    #  split keys on '_' for naming and use capital letters
+    #  denote on x axis how many quantiles were used
+    legend_without_duplicate_labels(ax)
+    plt.show()
 
     # now for testing how good the fit is
     MOM_Fisher = np.zeros(len(args.quantile_levels))
@@ -161,7 +207,10 @@ if __name__ == '__main__':
     beginning = datetime.datetime.now()
     print('Starting')
     args = main_args()
-    main(args)
+    n_excesses_ = np.linspace(args.min_nb_obs_considered_excesses,
+                              args.max_nb_obs_considered_excesses, args.n_different_excesses).astype(int)
+
+    main(args, n_excesses_)
     ending = datetime.datetime.now()
 
     print('Time: ', ending - beginning)

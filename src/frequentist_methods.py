@@ -124,7 +124,7 @@ class freq_methods:
 
         gamma = 1 / self.excesses.shape[0] * np.sum([np.log(1 + tau.x * y) for y in self.excesses])
         sigma = gamma / tau.x
-        print('alpha = ', 1 / gamma, '\n beta = ', sigma / gamma)
+        # print('alpha = ', 1 / gamma, '\n beta = ', sigma / gamma)
 
         for quantile_level in self.quantile_levels:
             quantiles_gpd_by_mle.append(
