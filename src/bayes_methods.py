@@ -9,6 +9,7 @@ from scipy.stats import f
 chain_length = 1000
 burn_up = 200
 
+
 # beta_frechet = 1/2
 # quant_th = np.zeros(len(q))
 # for i in range(len(q)):
@@ -21,61 +22,49 @@ class bayes_methods:
         self.excesses = excesses
         self.thresholds = thresholds
         self.n_excesses = excesses.shape[0]
+        self.chain_length = 1000
 
-def PWM_GPD(excesses, k, u):
-    quant_PWM_GPD = np.zeros(len(q))
-    sum1, sum2 = 0, 0
-    for i in range(k):
-        sum1 += excesses[i]
-        sum2 += i * excesses[i]
-    mu0 = sum1 / k
-    mu1 = sum1 / k - sum2 / k / k
-    for i in range(len(q)):
-        quant_PWM_GPD[i] = u + (2 * mu1 * mu0) / (mu0 - 4 * mu1) * (
-                    pow(N * (1 - q[i]) / k, -(4 * mu1 - mu0) / (2 * mu1 - mu0)) - 1)
-    return quant_PWM_GPD
+    def bayes_GPD(self, u):
+        """
+        we forward to function array of the quantiles as excesses, the number of excesses, k, and the border value u
+        """
+        k = self.excesses.shape[0]
+        quant_GPD = np.zeros(len(self.quantile_levels))
+        bayesian_quant_GPD = np.zeros(len(q))
+        plug_in_median_GPD = np.zeros(len(q))
+        median_quant_GPD = np.zeros(self.chain_length - burn_up)
+        all_median_quant_GPD = np.zeros(self.chain_length - burn_up)
 
+        # here we fit GPD to excesses via PyStan
+        data = dict(N=k, y=self.excesses)
+        fit = StanModel(model_code=GPD).sampling(data=data, iter=self.chain_length, warmup=burn_up, chains=1)
 
-def quantiles_GPD(excesses, k, u):
-    """
-    we forward to function array of the quantiles as excesses, the number of excesses, k, and the border value u
-    """
-    quant_GPD = np.zeros(len(q))
-    bayesian_quant_GPD = np.zeros(len(q))
-    plug_in_median_GPD = np.zeros(len(q))
-    median_quant_GPD = np.zeros(chain_length - burn_up)
-    all_median_quant_GPD = np.zeros(chain_length - burn_up)
+        # we save the params from the fit to calculate GPD quantiles and their traceplots to calculate Bayesian GPD quantiles
+        traceplot_beta_GPD = list(fit.extract().values())[1].tolist()
+        traceplot_alpha = list(fit.extract().values())[0].tolist()
+        traceplot_gamma = np.divide(np.ones(len(traceplot_alpha)), traceplot_alpha)
+        beta_GPD = np.mean(list(fit.extract().values())[1].tolist())
+        alpha = np.mean(list(fit.extract().values())[0].tolist())
+        gamma = 1 / alpha
 
-    # here we fit GPD to excesses via PyStan
-    data = dict(N=k, y=excesses)
-    fit = StanModel(model_code=GPD).sampling(data=data, iter=chain_length, warmup=burn_up, chains=1)
-
-    # we save the params from the fit to calculate GPD quantiles and their traceplots to calculate Bayesian GPD quantiles
-    traceplot_beta_GPD = list(fit.extract().values())[1].tolist()
-    traceplot_alpha = list(fit.extract().values())[0].tolist()
-    traceplot_gamma = np.divide(np.ones(len(traceplot_alpha)), traceplot_alpha)
-    beta_GPD = np.mean(list(fit.extract().values())[1].tolist())
-    alpha = np.mean(list(fit.extract().values())[0].tolist())
-    gamma = 1 / alpha
-
-    for i in range(len(q)):
-        plug_in_median_GPD[i] = u + np.median(traceplot_beta_GPD) * (
+        for i in range(len(q)):
+            plug_in_median_GPD[i] = self.thresholds + np.median(traceplot_beta_GPD) * (
                     pow(N * (1 - q[i]) / k, - 1 / np.median(traceplot_alpha)) - 1)
-        quant_GPD[i] = u + beta_GPD * (pow(N * (1 - q[i]) / k, -gamma) - 1)
-        for j in range(len(traceplot_gamma)):
-            bayesian_quant_GPD[i] += u + traceplot_beta_GPD[j] * (pow(N * (1 - q[i]) / k, - traceplot_gamma[j]) - 1)
-            median_quant_GPD[j] = u + traceplot_beta_GPD[j] * (pow(N * (1 - q[i]) / k, - traceplot_gamma[j]) - 1)
-        all_median_quant_GPD = np.column_stack((all_median_quant_GPD, median_quant_GPD))
-    bayesian_quant_GPD = bayesian_quant_GPD / len(traceplot_gamma)
-    all_median_quant_GPD = np.delete(all_median_quant_GPD, 0, 1)
-    #     for j in ran?ge(len(traceplot_gamma)):
-    store_medians = np.zeros(len(q))
-    # taking a median of quantiles compyted in Bayesian method
-    for i in range(len(q)):
-        store_medians[i] = np.median(all_median_quant_GPD[:, i])
+            quant_GPD[i] = self.thresholds + beta_GPD * (pow(N * (1 - q[i]) / k, -gamma) - 1)
+            for j in range(len(traceplot_gamma)):
+                bayesian_quant_GPD[i] += self.thresholds + traceplot_beta_GPD[j] * (pow(N * (1 - q[i]) / k, - traceplot_gamma[j]) - 1)
+                median_quant_GPD[j] = self.thresholds + traceplot_beta_GPD[j] * (pow(N * (1 - q[i]) / k, - traceplot_gamma[j]) - 1)
+            all_median_quant_GPD = np.column_stack((all_median_quant_GPD, median_quant_GPD))
+        bayesian_quant_GPD = bayesian_quant_GPD / len(traceplot_gamma)
+        all_median_quant_GPD = np.delete(all_median_quant_GPD, 0, 1)
+        #     for j in ran?ge(len(traceplot_gamma)):
+        store_medians = np.zeros(len(q))
+        # taking a median of quantiles compyted in Bayesian method
+        for i in range(len(q)):
+            store_medians[i] = np.median(all_median_quant_GPD[:, i])
 
-    list_of_params = [alpha, beta_GPD]
-    return quant_GPD, bayesian_quant_GPD, list_of_params, store_medians, plug_in_median_GPD
+        list_of_params = [alpha, beta_GPD]
+        return quant_GPD, bayesian_quant_GPD, list_of_params, store_medians, plug_in_median_GPD
 
 
 # it return arrays: quant_GPD, bayesian_quant_GPD and values alpha, beta_GPD
@@ -151,6 +140,7 @@ def quantiles_Fisher(excesses, k, u):
 
     list_of_params = [alpha1, alpha2, beta]
     return quant_Fisher, bayesian_quant_Fisher, list_of_params, traceplot_alpha1, store_medians, plug_in_median_Fisher
+
 
 GPD = """
 functions {
