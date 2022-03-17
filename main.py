@@ -1,12 +1,9 @@
 import numpy
 import numpy as np
-import pandas as pd
 
 import datetime
 from pathlib import Path
 from arg_parser import main_args
-from src.data.make_data import create_burr_data
-import matplotlib.pyplot as plt
 
 
 def compute_true_quantiles(quantile_levels: list, burr_beta: float, burr_lambda: float, burr_tau: float) -> list:
@@ -66,7 +63,7 @@ def estimate_quantiles_frequentist_methods(args, burr_data, n_excesses_):
 
 
 def estimate_quantiles_bayesian_methods(args, burr_data, n_excesses_):
-    from src.bayes_methods import bayes_methods
+    from src.bayesian_estimation.bayes_methods import bayes_methods
     # How many values do we want to consider as excesses. The more, the better approximation should we obtain
 
     keep_quantiles = {'pwm_gpd': np.zeros((len(args.quantile_levels), n_excesses_.shape[0])).T,
@@ -80,18 +77,10 @@ def estimate_quantiles_bayesian_methods(args, burr_data, n_excesses_):
         qnts = np.zeros((len(keep_quantiles), len(args.quantile_levels)))
 
         for excesses, threshold in zip(shifted_excesses, thresholds):
-            frequentist = freq_methods(data=burr_data, quantile_levels=args.quantile_levels,
+            bayes = bayes_methods(data=burr_data, quantile_levels=args.quantile_levels,
                                        excesses=excesses, thresholds=thresholds)
             # fit GPD and Fisher distributions to excesses from each dataset
-            qnts[0] += frequentist.PWM_GPD()
-            qnts[1] += frequentist.MOM_GPD()  #
-            qnts[2] += frequentist.MLE_GPD()
-            qnts[3] += frequentist.MOM_Fisher()
-
-        keep_quantiles.get('pwm_gpd')[ind] = qnts[0] / args.n_different_samples
-        keep_quantiles.get('mom_gpd')[ind] = qnts[1] / args.n_different_samples
-        keep_quantiles.get('mle_gpd')[ind] = qnts[2] / args.n_different_samples
-        keep_quantiles.get('mom_fisher')[ind] = qnts[3] / args.n_different_samples
+            qnts[0] += bayes.bayes_GPD()
 
     return keep_quantiles
 
@@ -110,60 +99,46 @@ def l2_norm(arr: np.ndarray, ind: int, true_quantile: float):
     return np.sqrt(squared_norm_ss / arr.shape[1])  # arr.shape should be the nb of different thresholds tried?
 
 
-def plot(keep_quantiles:dict):
+def plot(keep_quantiles: dict):
     import matplotlib.pyplot as plt
 
-    # set different colors for each set of positions
-    fig, ax = plt.subplots()
-    colors1 = ['C{}'.format(i) for i in range(5)]
-    # create a vertical plot
-    # set different line properties for each set of positions
-    # note that some overlap
-    lineoffsets1 = np.array([-15, -3, 1, 1.5, 6])
-    linelengths1 = [5, 2, 1, 1, 3]
+    col = ['b', 'g', 'r', 'c', 'y']
+    symbols = ['*', 'x', '>', '<', '.']
+    # fig, ax = plt.subplots()
 
-    ax.eventplot(keep_quantiles.get('mom_fisher').T, colors=colors1, lineoffsets=lineoffsets1,
-                        linelengths=linelengths1, orientation='vertical')
+    def def_marker(key: str) -> str:
+        if 'mom_fisher' in key:
+            return symbols[0]
+        elif 'mom_gpd' in key:
+            return symbols[1]
+        elif 'mle_gpd' in key:
+            return symbols[2]
+        elif 'pwm_gpd' in key:
+            return symbols[3]
 
-    # create another set of random data.
-    # the gamma distribution is only used fo aesthetic purposes
-    data2 = np.random.gamma(4, size=[60, 50])
-
-    # use individual values for the parameters this time
-    # these values will be used for all data sets (except lineoffsets2, which
-    # sets the increment between each data set in this usage)
-    colors2 = 'black'
-    lineoffsets2 = 1
-    linelengths2 = 1
-
-    # create a horizontal plot
-    ax.eventplot(data2, colors=colors2, lineoffsets=lineoffsets2,
-                        linelengths=linelengths2)
-
-    # create a vertical plot
-    ax.eventplot(data2, colors=colors2, lineoffsets=lineoffsets2,
-                        linelengths=linelengths2, orientation='vertical')
-
-    plt.show()
-
-    ax.scatter(args.quantile_levels, keep_quantiles.get('mom_fisher'))
-    ax.scatter(keep_quantiles.get('mom_gpd'))
-    ax.scatter(keep_quantiles.get('mle_gpd'))
-    ax.scatter(keep_quantiles.get('pwm_gpd'))
-    fig.show()
-
-    # another trial
-    # colors = ['blue', 'orange', 'green', 'red', 'brown']
-    import matplotlib.cm as cm
+    def legend_without_duplicate_labels(ax):
+        handles, labels = ax.get_legend_handles_labels()
+        unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
+        ax.legend(*zip(*unique))
 
     fig, ax = plt.subplots()
-    colors = ['r', 'c', 'm', 'y', 'g']
-    # colors = cm.rainbow(np.linspace(0, 1, 5))
-    # loop over symbols
-    # for (keys, values), col in zip(keep_quantiles.items(), colors):
-    #     print(col)
-    ax.plot(n_excesses_, keep_quantiles.get('mom_gpd'), 'x')  # , c=colors
-    ax.plot(n_excesses_, keep_quantiles.get('mle_gpd'), '.')  # , c=colors
+    for keys, values in keep_quantiles.items():
+        if keys is not 'mom_fisher':  # for now omit mom_fisher because the values are very different
+            for xe, ye in zip(n_excesses_, values):
+                # ax.plot([xe] * len(ye), ye[, def_marker(keys), label=keys)
+                for i in range(values.shape[0]):
+                    ax.plot([xe] * len([ye[i]]), ye[i], def_marker(keys), label=keys, c=col[i])
+    # todo: put on the legend which color corresponds to which quantile level
+    #  split keys on '_' for naming and use capital letters
+    #  denote on x axis how many quantiles were used
+
+    # f = lambda m, c: plt.plot([], [], marker=m, color=c, ls="none")[0]
+    #
+    # handles = [f("s", colors[i]) for i in range(3)]
+    # handles += [f(markers[i], "k") for i in range(3)]
+
+    legend_without_duplicate_labels(ax)
+
     plt.show()
 
 
@@ -183,53 +158,14 @@ def main(args, n_excesses_):
               f'var {round(np.var(burr_data[ind]), 3)}')
     plt.show()
 
-    keep_quantiles = estimate_quantiles_frequentist_methods(args, burr_data, n_excesses_)
+    # keep_quantiles = estimate_quantiles_frequentist_methods(args, burr_data, n_excesses_)
+    keep_quantiles = estimate_quantiles_bayesian_methods(args, burr_data, n_excesses_)
     # todo here get the bayesian quantile estimates
 
     # qnts_pwm_gpd, qnts_mom_gpd, qnts_mom_fisher, qnts_mle_gpd
     # columns: different nb of excesses used to estimate quantiles
     # rows: quantiles of different levels
-
-    col = ['b', 'g', 'r', 'c', 'y']
-    symbols = ['*', 'x', '>', '<', '.']
-    # fig, ax = plt.subplots()
-
-    def def_marker(key: str) -> str:
-        if 'mom_fisher' in key:
-            return symbols[0]
-        elif 'mom_gpd' in key:
-            return symbols[1]
-        elif 'mle_gpd' in key:
-            return symbols[2]
-        elif 'pwm_gpd' in key:
-            return symbols[3]
-
-    import matplotlib.pyplot as plt
-
-    def legend_without_duplicate_labels(ax):
-        handles, labels = ax.get_legend_handles_labels()
-        unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
-        ax.legend(*zip(*unique))
-
-    fig, ax = plt.subplots()
-    for keys, values in keep_quantiles.items():
-        if keys is not 'mom_fisher':  # for now omit mom_fisher because the values are very different
-            for xe, ye in zip(n_excesses_, values):
-                # ax.plot([xe] * len(ye), ye[, def_marker(keys), label=keys)
-                for i in range(values.shape[0]):
-                    ax.plot([xe] * len([ye[i]]), ye[i], def_marker(keys), label=keys, c=col[i])
-    # todo: put on the legend which color corresponds to which quantile level
-    #  split keys on '_' for naming and use capital letters
-    #  denote on x axis how many quantiles were used
-
-    f = lambda m, c: plt.plot([], [], marker=m, color=c, ls="none")[0]
-
-    handles = [f("s", colors[i]) for i in range(3)]
-    handles += [f(markers[i], "k") for i in range(3)]
-
-    legend_without_duplicate_labels(ax)
-
-    plt.show()
+    plot(keep_quantiles)
 
     # now for testing how good the fit is
     MOM_Fisher = np.zeros(len(args.quantile_levels))
