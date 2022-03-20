@@ -1,12 +1,116 @@
 import numpy as np
-from pystan import StanModel
 from scipy.stats import f
+
+import pymc as pm
+import aesara.tensor as at
+from src.bayesian_estimation.pystan_models import GPD, Fisher
+import scipy.special as sc
 
 # beta_frechet = 1/2
 # quant_th = np.zeros(len(q))
 # for i in range(len(q)):
 #     quant_th[i] = pow(-log(q[i]), -beta_frechet)
-from src.bayesian_estimation.pystan_models import GPD, Fisher
+
+
+def jprior_alpha(alpha: float):
+    """
+    Jeffrey priors on alpha in the GPD
+    :param alpha:
+    :return:
+    """
+    assert alpha >= 0, 'alpha is negative'
+    lpdf = lambda param_alpha: -np.log(param_alpha + 1) - 1 / 2 * (np.log(param_alpha) + np.log(param_alpha + 2))
+    return pm.DensityDist('jeffrey_alpha', logp=lpdf(alpha))
+
+
+def jprior_beta(beta: float):
+    """
+    Jeffrey priors on beta in the GPD
+    :param beta:
+    :return:
+    """
+    assert beta >= 0, 'alpha is negative'
+    lpdf = lambda param_beta: np.log(1 / param_beta)
+    return pm.DensityDist('jeffrey_beta', logp=lpdf(beta))
+
+
+def gpd_model(excesses: np.ndarray):
+    # log pdf of the gpd used
+    myGPD_lpdf = lambda x, alpha, beta: -(alpha + 1) * (np.log(1 + x / beta)) + (np.log(alpha) - np.log(beta))
+    # log pdf of the Fisher used
+    myFisher_lpdf = lambda x, alpha1, alpha2, beta: -sc.beta(alpha1, alpha2) - np.log(beta) + (alpha1 - 1) * np.log(x / beta) - (alpha1 + alpha2) * np.log(1 + x / beta);
+    # defining Jeffrey prior
+
+    # theta1 = pm.DensityDist('theta1', jprior_alpha, value, y=theta2)
+
+    with pm.Model() as gpd_model:
+        alpha = pm.Gamma('alpha', 1, 1)
+
+        # Create custom densities
+        lGPD = pm.DensityDist('lGPD', logp=myGPD_lpdf(jprior_alpha, ), observed=excesses)
+
+        # Generate a MCMC chain
+        start = pm.find_MAP()  # Find starting value by optimization
+        trace = pm.sample(10000, pm.NUTS(), progressbar=False)  # Use NUTS sampling
+
+        lFisher = pm.DensityDist('lFisher', logp=myFisher_lpdf)
+        # Create likelihood
+    with gpd_model:
+        # obtain starting values via MAP
+        startvals = pm.find_MAP(model=gpd_model)
+
+        # instantiate sampler
+        # step = pm.Metropolis()
+        step = pm.HamiltonianMC()
+        # step = pm.NUTS()
+
+        # draw 5000 posterior samples
+        trace = pm.sample(start=startvals, draws=1000, step=step, tune=500, chains=4, cores=1,
+                          discard_tuned_samples=True)
+
+        # Obtaining Posterior Predictive Sampling:
+        post_pred = pm.sample_posterior_predictive(trace, samples=500)
+        print(post_pred['observed_data'].shape)
+
+
+def gpd_model_(excesses: np.ndarray):
+    with pm.Model() as model:
+        # Parameters:
+        # Prior Distributions:
+        # BoundedNormal = pm.Bound(pm.Exponential, lower=0.0, upper=np.inf)
+        # c = BoundedNormal('c', lam=10)
+        # c = pm.Uniform('c', lower=0, upper=300)
+        alpha = pm.Normal('alpha', mu=0, sd=10)
+        beta = pm.Normal('beta', mu=0, sd=1)
+        sigma = pm.HalfNormal('sigma', sd=1)
+        mu = pm.Normal('mu', mu=0, sigma=1)
+        sd = pm.HalfNormal('sd', sigma=1)
+
+        # Observed data is from a Multinomial distribution:
+        # Likelihood distributions:
+        # bradford = pm.DensityDist('observed_data', logp=bradford_logp, observed=dict(value=S1, loc=mu, scale=sd, c=c))
+        observed_data = pm.Beta('observed_data', alpha=alpha, beta=beta, mu=mu, sd=sd, observed=excesses)
+
+    with model:
+        # obtain starting values via MAP
+        startvals = pm.find_MAP(model=model)
+
+        # instantiate sampler
+        # step = pm.Metropolis()
+        step = pm.HamiltonianMC()
+        # step = pm.NUTS()
+
+        # draw 5000 posterior samples
+        trace = pm.sample(start=startvals, draws=1000, step=step, tune=500, chains=4, cores=1,
+                          discard_tuned_samples=True)
+
+        # Obtaining Posterior Predictive Sampling:
+        post_pred = pm.sample_posterior_predictive(trace, samples=500)
+        print(post_pred['observed_data'].shape)
+
+
+def fisher_model():
+    pass
 
 
 class bayes_methods:
@@ -30,6 +134,7 @@ class bayes_methods:
         all_median_quant_GPD = np.zeros(self.chain_length - self.burn_up)
 
         # here we fit GPD to excesses via PyStan
+        m = gpd_model(self.excesses)
         data = dict(N=k, y=self.excesses)
         fit = StanModel(model_code=GPD).sampling(data=data, iter=self.chain_length, warmup=self.burn_up, chains=1)
 
@@ -93,14 +198,19 @@ class bayes_methods:
         beta0 = alpha2 / alpha1
         beta0_plugin = np.median(traceplot_alpha2) / np.median(traceplot_alpha1)
 
+        def get_quantiles(N, u, k, quant_level, a1, a2, b):
+            return u + f.isf(N/k * (1-quant_level), a1, a2, b)
+
         for i in range(len(self.quantile_levels)):
             if np.median(traceplot_alpha1) > 0 and np.median(traceplot_alpha2) > 0:
-                plug_in_median_Fisher[i] = u + f.isf(N / k * (1 - self.quantile_levels[i]),
-                                                     2 * np.median(traceplot_alpha1),
-                                                     2 * np.median(traceplot_alpha2),
-                                                     loc=0,
-                                                     scale=np.median(traceplot_beta) / beta0_plugin)
-            if alpha1 > 0 and alpha2 > 0:
+                plug_in_median_Fisher[i] = get_quantiles(N, u, k, self.quantile_levels[i],
+                                                         a1, a2, np.median(traceplot_beta) / beta0_plugin)
+            #     plug_in_median_Fisher[i] = u + f.isf(N / k * (1 - self.quantile_levels[i]),
+            #                                          2 * np.median(traceplot_alpha1),
+            #                                          2 * np.median(traceplot_alpha2),
+            #                                          loc=0,
+            #                                          scale=np.median(traceplot_beta) / beta0_plugin)
+            # if alpha1 > 0 and alpha2 > 0:
                 quant_Fisher[i] = u + f.isf(N / k * (1 - self.quantile_levels[i]),
                                             2 * alpha1,
                                             2 * alpha2,

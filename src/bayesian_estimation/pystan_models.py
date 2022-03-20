@@ -10,7 +10,7 @@ data {
 }
 parameters { 
   real<lower = 0> alpha;
-  real<lower = 0> beta; // we set the bounderies for the computational facility
+  real<lower = 0> beta; // we set the bounderies 
 }
 model {
 // Priors here to be defined; no priors - we assume improper priors on params
@@ -27,6 +27,7 @@ model {
 }
 generated quantities{}
 """
+
 Fisher = """
 functions { 
  real myFisher_lpdf(real y, real alpha1, real alpha2, real beta) {

@@ -143,7 +143,7 @@ def plot(keep_quantiles: dict):
 
 
 def main(args, n_excesses_):
-    import matplotlib.pyplot as plt
+    # import matplotlib.pyplot as plt
     # load data
     save_dir = Path.cwd() / 'src/data/data_burr/'
     file_name = save_dir.__str__() + f'\\beta_{args.burr_beta}__tau_{args.burr_tau}__lambda_{args.burr_lambda}__n_samples_{args.n_different_samples}__n_obs_per_sample_{args.n_points_each_sample}.npy'
@@ -153,10 +153,10 @@ def main(args, n_excesses_):
 
     # take a random sample for plotting and computing first two moments
     ind = int(np.random.uniform(burr_data.shape[0], size=1))
-    plt.hist(burr_data[ind], bins='auto')
-    plt.title(f'Empirical mean {round(np.mean(burr_data[ind]),3)}, '
-              f'var {round(np.var(burr_data[ind]), 3)}')
-    plt.show()
+    # plt.hist(burr_data[ind], bins='auto')
+    # plt.title(f'Empirical mean {round(np.mean(burr_data[ind]),3)}, '
+    #           f'var {round(np.var(burr_data[ind]), 3)}')
+    # plt.show()
 
     # keep_quantiles = estimate_quantiles_frequentist_methods(args, burr_data, n_excesses_)
     keep_quantiles = estimate_quantiles_bayesian_methods(args, burr_data, n_excesses_)
