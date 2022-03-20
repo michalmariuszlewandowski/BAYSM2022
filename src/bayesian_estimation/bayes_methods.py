@@ -36,7 +36,6 @@ def myGPD_lpdf(alpha, beta, value):
     :param value:
     :return:
     """
-    assert alpha >= 0 and beta >= 0, 'Invalid values of params'
     return -(alpha + 1) * (np.log(1 + value / beta)) + (np.log(alpha) - np.log(beta))
 
 
@@ -49,12 +48,12 @@ def myFisher_lpdf(alpha1, alpha2, beta, value):
     :param value:
     :return:
     """
-    assert alpha1 >= 0 and alpha2 >= 0 and beta >= 0, 'Invalid values of params'
     return -sc.beta(alpha1, alpha2) - np.log(beta) + (alpha1 - 1) * np.log(value / beta) - (alpha1 + alpha2) * np.log(
         1 + value / beta)
 
 
 def gpd_model(excesses: np.ndarray):
+    # using pymc3
     with pm.Model() as model:
         # trying with simple priors to begin with
         alpha = pm.Gamma('alpha', 1, 1)
