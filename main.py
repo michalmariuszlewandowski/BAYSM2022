@@ -64,7 +64,7 @@ def estimate_quantiles_frequentist_methods(args, burr_data, n_excesses_):
 
 def estimate_quantiles_bayesian_methods(args, burr_data, n_excesses_):
     from src.bayesian_estimation.bayes_methods import bayes_methods
-    # How many values do we want to consider as excesses. The more, the better approximation should we obtain
+    # How many values do we want to consider as excesses
 
     keep_quantiles = {'pwm_gpd': np.zeros((len(args.quantile_levels), n_excesses_.shape[0])).T,
                       'mom_gpd': np.zeros((len(args.quantile_levels), n_excesses_.shape[0])).T,
@@ -100,6 +100,11 @@ def l2_norm(arr: np.ndarray, ind: int, true_quantile: float):
 
 
 def plot(keep_quantiles: dict):
+    """
+    todo this should be a class
+    :param keep_quantiles:
+    :return:
+    """
     import matplotlib.pyplot as plt
 
     col = ['b', 'g', 'r', 'c', 'y']
@@ -166,20 +171,7 @@ def main(args, n_excesses_):
     # columns: different nb of excesses used to estimate quantiles
     # rows: quantiles of different levels
     plot(keep_quantiles)
-
-    # now for testing how good the fit is
-    MOM_Fisher = np.zeros(len(args.quantile_levels))
-    MOM_GPD = np.zeros(len(args.quantile_levels))
-    MLE_GPD = np.zeros(len(args.quantile_levels))
-    PWM_GPD = np.zeros(len(args.quantile_levels))
-
-    for ind in range(len(args.quantile_levels)):
-        # q[i] - current level - get all distance of all methods for this level
-        # this is already for testing how good the estimate is
-        MOM_Fisher[ind] = l2_norm(keep_quantiles.get('mom_fisher'), ind, args.quantile_levels[ind])
-        MOM_GPD[ind] = l2_norm(keep_quantiles.get('mom_gpd'), ind, args.quantile_levels[ind])
-        MLE_GPD[ind] = l2_norm(keep_quantiles.get('mle_gpd'), ind, args.quantile_levels[ind])
-        PWM_GPD[ind] = l2_norm(keep_quantiles.get('pwm_gpd'), ind, args.quantile_levels[ind])
+    print('Done')
 
 
 if __name__ == '__main__':
